@@ -13,6 +13,9 @@ from mininet.cli import CLI
 from mininet.log import setLogLevel
 from mininet.util import dumpNodeConnections
 
+
+from functools import partial
+from collections import defaultdict, OrderedDict
 class GeneratedTopo( Topo ):
     "Internet Topology Zoo Specimen."
 
@@ -34,15 +37,15 @@ class GeneratedTopo( Topo ):
         s9 = self.addSwitch( 's9' )
 
         # ... and now hosts
-        h1 = self.addHost( 'HARVARD' )
-        h2 = self.addHost( 'SRI' )
-        h3 = self.addHost( 'UCSB' )
-        h4 = self.addHost( 'UCLA' )
-        h5 = self.addHost( 'RAND' )
-        h6 = self.addHost( 'SDC' )
-        h7 = self.addHost( 'UTAH' )
-        h8 = self.addHost( 'MIT' )
-        h9 = self.addHost( 'BBN' )
+        h1 = self.addHost( 'Chic' )
+        h2 = self.addHost( 'Wash' )
+        h3 = self.addHost( 'Newy' )
+        h4 = self.addHost( 'Atla' )
+        h5 = self.addHost( 'Hous' )
+        h6 = self.addHost( 'Kans' )
+        h7 = self.addHost( 'Salt' )
+        h8 = self.addHost( 'Seat' )
+        h9 = self.addHost( 'Losa' )
 
         # add edges between switch and corresponding host
         self.addLink( s1 , h1 )
@@ -55,19 +58,35 @@ class GeneratedTopo( Topo ):
         self.addLink( s8 , h8 )
         self.addLink( s9 , h9 )
 
-
         # add edges between switches
-        self.addLink( s1 , s9, bw=10, delay='10ms')
-        self.addLink( s2 , s3, bw=10, delay='11ms')
-        self.addLink( s2 , s4, bw=10, delay='13ms')
-        self.addLink( s3 , s4, bw=10, delay='14ms')
-        self.addLink( s4 , s5, bw=10, delay='15ms')
-        self.addLink( s5 , s9, bw=10, delay='29ms')
-        self.addLink( s5 , s6, bw=10, delay='17ms')
-        self.addLink( s6 , s7, bw=10, delay='10ms')
-        self.addLink( s7 , s8, bw=10, delay='62ms')
-        self.addLink( s8 , s9, bw=10, delay='17ms')
-
+        self.addLink( s1 , s2)
+        self.addLink( s1 , s2)
+        self.addLink( s1 , s3)
+        self.addLink( s1 , s3)
+        self.addLink( s1 , s4)
+        self.addLink( s1 , s4)
+        self.addLink( s1 , s6)
+        self.addLink( s1 , s6)
+        self.addLink( s1 , s6)
+        self.addLink( s2 , s3)
+        self.addLink( s2 , s3)
+        self.addLink( s2 , s4)
+        self.addLink( s2 , s4)
+        self.addLink( s2 , s4)
+        self.addLink( s4 , s5)
+        self.addLink( s4 , s5)
+        self.addLink( s5 , s6)
+        self.addLink( s5 , s6)
+        self.addLink( s5 , s9)
+        self.addLink( s5 , s9)
+        self.addLink( s6 , s7)
+        self.addLink( s6 , s7)
+        self.addLink( s7 , s8)
+        self.addLink( s7 , s8)
+        self.addLink( s7 , s9)
+        self.addLink( s7 , s9)
+        self.addLink( s8 , s9)
+        self.addLink( s8 , s9)
 
 topos = { 'generated': ( lambda: GeneratedTopo() ) }
 
@@ -114,6 +133,8 @@ def sshd( network, cmd='/usr/sbin/sshd', opts='-D' ):
     for host in network.hosts:
         host.cmd( cmd + ' ' + opts + '&' )
 
+    # DEBUGGING INFO
+
     dumpNodeConnections(network.hosts)
 
 
@@ -121,12 +142,70 @@ def sshd( network, cmd='/usr/sbin/sshd', opts='-D' ):
     for host in network.hosts:
         host.cmd( 'kill %' + cmd )
     network.stop()
+def sorted_dict(d):
+    res = OrderedDict()
+    for k, v in sorted(d.items(), key=lambda x: x[0]):
+        res[k] = v
+    return res
+
+def get_switch_ip(x):
+    return '20.0.0.' + str(x % 1000)
+
+def create_topo_for_veriflow(net):
+    if net is None:
+        return
+
+    host_ips = {}
+    for host in net.hosts:
+        host_ips[host.name] = host.IP()
+
+    connections = defaultdict(list)
+    for link in net.links:
+        src, src_port = str(link.intf1).split('-eth')
+        dst, dst_port = str(link.intf2).split('-eth')
+        connections[src].append((src_port, dst))
+        connections[dst].append((dst_port, src))
+
+    switch_connection, host_connection = OrderedDict(), OrderedDict()
+    for k, v in connections.items():
+        if k.startswith('s'):
+            switch_connection[int(k.replace('s', ''))] = v
+        else:
+            host_connection[k] = v
+
+    switch_connection = sorted_dict(switch_connection)
+    host_connection = sorted_dict(host_connection)
+
+    with open('Internet2_topo.txt', 'w') as topo_file:
+        # switch
+        topo_file.write('# switches\n')
+        for k, v in switch_connection.items():
+            line = str(k) + ' '
+            line += get_switch_ip(k) + ' ' + '0'
+            for port, node in v:
+                if node.startswith('s'):
+                    line += ' ' + port + ' ' + get_switch_ip(int(node.replace('s', '')))
+                else:
+                    line += ' ' + port + ' ' + host_ips[node]
+            topo_file.write(line + '\n')
+
+        topo_file.write('\n# hosts\n')
+        for k, v in host_connection.items():
+            id = 100 + int(host_ips[k].split('.')[-1])
+            line = str(id) + ' '
+            line += host_ips[k] + ' ' + '1'
+            for port, node in v:
+                line += ' ' + port + ' ' + get_switch_ip(int(node.replace('s', '')))
+            topo_file.write(line + '\n')
 
 # by zys
 def start_network(network):
     network.start()
 
+    create_topo_for_veriflow(network)
+
     dumpNodeConnections(network.hosts)
+
 
     CLI( network )
     network.stop()
@@ -136,3 +215,4 @@ if __name__ == '__main__':
     #setLogLevel('debug')
     # sshd( setupNetwork(controller_ip) )
     start_network(setupNetwork(controller_ip))
+

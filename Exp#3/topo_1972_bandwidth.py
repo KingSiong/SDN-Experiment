@@ -7,11 +7,15 @@ from mininet.topo import Topo
 from mininet.net import Mininet
 from mininet.node import RemoteController
 from mininet.node import Node
+from mininet.node import OVSSwitch
 from mininet.node import CPULimitedHost
 from mininet.link import TCLink
 from mininet.cli import CLI
 from mininet.log import setLogLevel
 from mininet.util import dumpNodeConnections
+
+from functools import partial
+from collections import defaultdict, OrderedDict
 
 class GeneratedTopo( Topo ):
     "Internet Topology Zoo Specimen."
@@ -33,16 +37,21 @@ class GeneratedTopo( Topo ):
         s8 = self.addSwitch( 's8' )
         s9 = self.addSwitch( 's9' )
 
+
+
         # ... and now hosts
-        h1 = self.addHost( 'HARVARD' )
+        h1 = self.addHost( 'McClellan' )
         h2 = self.addHost( 'SRI' )
         h3 = self.addHost( 'UCSB' )
         h4 = self.addHost( 'UCLA' )
-        h5 = self.addHost( 'RAND' )
-        h6 = self.addHost( 'SDC' )
-        h7 = self.addHost( 'UTAH' )
-        h8 = self.addHost( 'MIT' )
-        h9 = self.addHost( 'BBN' )
+        h5 = self.addHost( 'AMES' )
+        h6 = self.addHost( 'AMES13' )
+        h7 = self.addHost( 'Stanford' )
+        h8 = self.addHost( 'RAND' )
+        h9 = self.addHost( 'SDC' )
+
+
+
 
         # add edges between switch and corresponding host
         self.addLink( s1 , h1 )
@@ -55,19 +64,16 @@ class GeneratedTopo( Topo ):
         self.addLink( s8 , h8 )
         self.addLink( s9 , h9 )
 
-
         # add edges between switches
-        self.addLink( s1 , s9, bw=10, delay='10ms')
-        self.addLink( s2 , s3, bw=10, delay='11ms')
-        self.addLink( s2 , s4, bw=10, delay='13ms')
-        self.addLink( s3 , s4, bw=10, delay='14ms')
-        self.addLink( s4 , s5, bw=10, delay='15ms')
-        self.addLink( s5 , s9, bw=10, delay='29ms')
-        self.addLink( s5 , s6, bw=10, delay='17ms')
-        self.addLink( s6 , s7, bw=10, delay='10ms')
-        self.addLink( s7 , s8, bw=10, delay='62ms')
-        self.addLink( s8 , s9, bw=10, delay='17ms')
-
+        self.addLink( s1 , s2, bw=1000, delay='50ms')
+        self.addLink( s2 , s3, bw=1000, delay='34ms')
+        self.addLink( s3 , s4, bw=1000, delay='13ms')
+        self.addLink( s2 , s5, bw=1000, delay='14ms')
+        self.addLink( s5 , s6, bw=1000, delay='15ms')
+        self.addLink( s6 , s7, bw=1000, delay='12ms')
+        self.addLink( s7 , s8, bw=1000, delay='17ms')
+        self.addLink( s4 , s8, bw=1000, delay='10ms')
+        self.addLink( s8 , s9, bw=1000, delay='18ms')
 
 topos = { 'generated': ( lambda: GeneratedTopo() ) }
 
@@ -82,19 +88,19 @@ def setupNetwork(controller_ip):
     # check if remote controller's ip was set
     # else set it to localhost
     topo = GeneratedTopo()
+    switch = partial(OVSSwitch, protocols='OpenFlow13')
     if controller_ip == '':
-        #controller_ip = '10.0.2.2';
         controller_ip = '127.0.0.1';
-    net = Mininet(topo=topo, controller=lambda a: RemoteController( a, ip=controller_ip, port=6633 ), host=CPULimitedHost, link=TCLink)
+    net = Mininet(topo=topo, switch=switch, controller=lambda a: RemoteController( a, ip=controller_ip, port=6633 ), host=CPULimitedHost, link=TCLink)
     return net
 
 def connectToRootNS( network, switch, ip, prefixLen, routes ):
     "Connect hosts to root namespace via switch. Starts network."
-    "network: Mininet() network object"
-    "switch: switch to connect to root namespace"
-    "ip: IP address for root namespace node"
-    "prefixLen: IP address prefix length (e.g. 8, 16, 24)"
-    "routes: host networks to route to"
+    # "network: Mininet() network object"
+    # "switch: switch to connect to root namespace"
+    # "ip: IP address for root namespace node"
+    # "prefixLen: IP address prefix length (e.g. 8, 16, 24)"
+    # "routes: host networks to route to"
     # Create a node in root namespace and link to switch 0
     root = Node( 'root', inNamespace=False )
     intf = TCLink( root, switch ).intf1
@@ -114,6 +120,8 @@ def sshd( network, cmd='/usr/sbin/sshd', opts='-D' ):
     for host in network.hosts:
         host.cmd( cmd + ' ' + opts + '&' )
 
+    # DEBUGGING INFO
+
     dumpNodeConnections(network.hosts)
 
 
@@ -122,11 +130,70 @@ def sshd( network, cmd='/usr/sbin/sshd', opts='-D' ):
         host.cmd( 'kill %' + cmd )
     network.stop()
 
+def sorted_dict(d):
+    res = OrderedDict()
+    for k, v in sorted(d.items(), key=lambda x: x[0]):
+        res[k] = v
+    return res
+
+def get_switch_ip(x):
+    return '20.0.' + str(x / 1000) + '.' + str(x % 1000)
+
+def create_topo_for_veriflow(net):
+    if net is None:
+        return
+
+    host_ips = {}
+    for host in net.hosts:
+        host_ips[host.name] = host.IP()
+
+    connections = defaultdict(list)
+    for link in net.links:
+        src, src_port = str(link.intf1).split('-eth')
+        dst, dst_port = str(link.intf2).split('-eth')
+        connections[src].append((src_port, dst))
+        connections[dst].append((dst_port, src))
+
+    switch_connection, host_connection = OrderedDict(), OrderedDict()
+    for k, v in connections.items():
+        if k.startswith('s'):
+            switch_connection[int(k.replace('s', ''))] = v
+        else:
+            host_connection[k] = v
+
+    switch_connection = sorted_dict(switch_connection)
+    host_connection = sorted_dict(host_connection)
+
+    with open('Arpanet19723.txt', 'w') as topo_file:
+        # switch
+        topo_file.write('# switches\n')
+        for k, v in switch_connection.items():
+            line = str(k) + ' '
+            line += get_switch_ip(k) + ' ' + '0'
+            for port, node in v:
+                if node.startswith('s'):
+                    line += ' ' + port + ' ' + get_switch_ip(int(node.replace('s', '')))
+                else:
+                    line += ' ' + port + ' ' + host_ips[node]
+            topo_file.write(line + '\n')
+
+        topo_file.write('\n# hosts\n')
+        for k, v in host_connection.items():
+            id = 100 + int(host_ips[k].split('.')[-1])
+            line = str(id) + ' '
+            line += host_ips[k] + ' ' + '1'
+            for port, node in v:
+                line += ' ' + port + ' ' + get_switch_ip(int(node.replace('s', '')))
+            topo_file.write(line + '\n')
+
 # by zys
 def start_network(network):
     network.start()
 
+    create_topo_for_veriflow(network)
+
     dumpNodeConnections(network.hosts)
+
 
     CLI( network )
     network.stop()

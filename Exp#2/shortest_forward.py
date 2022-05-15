@@ -191,10 +191,9 @@ class ShortestForward(app_manager.RyuApp):
                 instructions=None)
         dp.send_msg(mod)
 
-    def sup_del_flow(self, dp, priority=1):
+    def sup_del_flow(self, dp, match, priority=1):
         ofp = dp.ofproto
         parser = dp.ofproto_parser
-        match = parser.OFPMatch(eth_type=0x0800)
         mod = parser.OFPFlowMod(datapath=dp, cookie=0, cookie_mask=0, table_id=0,
                 command=ofp.OFPFC_DELETE,
                 idle_timeout=0, hard_timeout=0,
@@ -204,48 +203,6 @@ class ShortestForward(app_manager.RyuApp):
                 match=match,
                 instructions=None)
         dp.send_msg(mod)
-        match = parser.OFPMatch(eth_type=0x0806)
-        mod = parser.OFPFlowMod(datapath=dp, cookie=0, cookie_mask=0, table_id=0,
-                command=ofp.OFPFC_DELETE,
-                idle_timeout=0, hard_timeout=0,
-                priority=priority,
-                buffer_id=ofp.OFP_NO_BUFFER,
-                out_port=ofp.OFPP_ANY, out_group=ofp.OFPG_ANY, flags=ofp.OFPFF_SEND_FLOW_REM,
-                match=match,
-                instructions=None)
-        dp.send_msg(mod)
-
-    # @set_ev_cls(ofp_event.EventOFPPortStatus, MAIN_DISPATCHER)
-    # def port_status_handler(self, ev):
-    #     msg = ev.msg
-    #     dp = msg.datapath
-    #     ofp = dp.ofproto
-    #     parser = dp.ofproto_parser
-
-    #     if msg.reason == ofp.OFPPR_MODIFY:
-    #         reason = 'MODIFY'
-    #         if msg.desc.state == ofp.OFPPS_LINK_DOWN or msg.desc.state == ofp.OFPPS_LIVE:
-    #             self.sw.clear()
-    #             if dp.id in self.path:
-    #                 # arp flow_tables
-    #                 for i in range(1, len(self.path) - 1):
-    #                     now_dpid = self.path[i]
-    #                     now_dp = self.network_awareness.switch_info[now_dpid]
-    #                     if now_dpid in self.mac_to_port:
-    #                         self.delete_flow(now_dp)
-    #                         del self.mac_to_port[now_dpid]
-    #                 # ipv4 flow_tables
-    #                 for i in range(1, len(self.path) - 1):
-    #                     in_port = self.network_awareness.link_info[(self.path[i], self.path[i - 1])]
-    #                     out_port = self.network_awareness.link_info[(self.path[i], self.path[i + 1])]
-    #                     dpid = self.path[i]
-    #                     dp = self.network_awareness.switch_info[dpid]
-    #                     match = parser.OFPMatch(in_port=in_port, eth_type=0x0800, ipv4_src=self.path[0], ipv4_dst=self.path[-1])
-    #                     self.del_flow(dp, 1, match, out_port, IDLE_TIMEOUT, HARD_TIMEOUT)
-    #                     match = parser.OFPMatch(in_port=out_port, eth_type=0x0800, ipv4_src=self.path[-1], ipv4_dst=self.path[0])
-    #                     self.del_flow(dp, 1, match, in_port, IDLE_TIMEOUT, HARD_TIMEOUT)
-    #             self.logger.info('OFPPortStatus received: reason=%s, desc=%s',
-    #                     reason, msg.desc)
 
     @set_ev_cls(ofp_event.EventOFPPortStatus, MAIN_DISPATCHER)
     def port_status_handler(self, ev):
@@ -258,9 +215,44 @@ class ShortestForward(app_manager.RyuApp):
             reason = 'MODIFY'
             if msg.desc.state == ofp.OFPPS_LINK_DOWN or msg.desc.state == ofp.OFPPS_LIVE:
                 self.sw.clear()
-                self.mac_to_port.clear()
-                for dp in self.network_awareness.switch_info.values():
-                    self.sup_del_flow(dp)
-
+                if dp.id in self.path:
+                    # arp flow_tables
+                    for i in range(1, len(self.path) - 1):
+                        now_dpid = self.path[i]
+                        now_dp = self.network_awareness.switch_info[now_dpid]
+                        if now_dpid in self.mac_to_port:
+                            self.delete_flow(now_dp)
+                            del self.mac_to_port[now_dpid]
+                    # ipv4 flow_tables
+                    for i in range(1, len(self.path) - 1):
+                        in_port = self.network_awareness.link_info[(self.path[i], self.path[i - 1])]
+                        out_port = self.network_awareness.link_info[(self.path[i], self.path[i + 1])]
+                        dpid = self.path[i]
+                        dp = self.network_awareness.switch_info[dpid]
+                        match = parser.OFPMatch(in_port=in_port, eth_type=0x0800, ipv4_src=self.path[0], ipv4_dst=self.path[-1])
+                        self.del_flow(dp, 1, match, out_port, IDLE_TIMEOUT, HARD_TIMEOUT)
+                        match = parser.OFPMatch(in_port=out_port, eth_type=0x0800, ipv4_src=self.path[-1], ipv4_dst=self.path[0])
+                        self.del_flow(dp, 1, match, in_port, IDLE_TIMEOUT, HARD_TIMEOUT)
                 self.logger.info('OFPPortStatus received: reason=%s, desc=%s',
                         reason, msg.desc)
+
+    # @set_ev_cls(ofp_event.EventOFPPortStatus, MAIN_DISPATCHER)
+    # def port_status_handler(self, ev):
+    #     msg = ev.msg
+    #     dp = msg.datapath
+    #     ofp = dp.ofproto
+    #     parser = dp.ofproto_parser
+
+    #     if msg.reason == ofp.OFPPR_MODIFY:
+    #         reason = 'MODIFY'
+    #         if msg.desc.state == ofp.OFPPS_LINK_DOWN or msg.desc.state == ofp.OFPPS_LIVE:
+    #             self.sw.clear()
+    #             self.mac_to_port.clear()
+    #             for dp in self.network_awareness.switch_info.values():
+    #                 match = parser.OFPMatch(eth_type=0x0800)
+    #                 self.sup_del_flow(dp, match)
+    #                 match = parser.OFPMatch(eth_type=0x0806)
+    #                 self.sup_del_flow(dp, match)
+
+    #             self.logger.info('OFPPortStatus received: reason=%s, desc=%s',
+    #                     reason, msg.desc)
